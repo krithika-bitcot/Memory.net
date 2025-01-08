@@ -2,11 +2,11 @@ import pandas as pd
 import pytest
 
 # Validation function
-def is_valid_string(value):
+def is_valid_alphabet(value):
     """
-    Function to validate that a value is a string.
+    Function to validate that a value contains only alphabets.
     """
-    return isinstance(value, str)
+    return isinstance(value, str) and value.isalpha()
 
 @pytest.fixture
 def load_csv():
@@ -16,23 +16,23 @@ def load_csv():
     df.columns = df.columns.str.strip()  # Ensure no extra spaces in column names
     return df
 
-def test_string_columns(load_csv):
-    """Test and log results for specific columns containing only string values."""
+def test_alphabet_columns(load_csv):
+    """Test and log results for specific columns containing only alphabetic values."""
     df = load_csv
 
     # Columns to validate
     columns_to_test = ['store', 'A', 'B']
 
     with open("test_results_1.txt", "w") as result_file:
-        result_file.write("===== TEST RESULTS FOR STRING VALIDATION =====\n\n")
+        result_file.write("===== TEST RESULTS FOR ALPHABET VALIDATION =====\n\n")
 
         for column in columns_to_test:
             # Check if the column exists
             assert column in df.columns, f"Column '{column}' not found in the CSV file."
 
             # Separate valid and invalid rows
-            valid_rows = df[df[column].apply(is_valid_string)]
-            invalid_rows = df[~df[column].apply(is_valid_string)]
+            valid_rows = df[df[column].apply(is_valid_alphabet)]
+            invalid_rows = df[~df[column].apply(is_valid_alphabet)]
 
             # Log results for the column
             result_file.write(f"Results for column '{column}':\n")
@@ -58,5 +58,5 @@ def test_string_columns(load_csv):
             result_file.write("\n")
 
         # Always fail the test if invalid rows exist in any column
-        if any(~df[column].apply(is_valid_string).all() for column in columns_to_test):
+        if any(~df[column].apply(is_valid_alphabet).all() for column in columns_to_test):
             raise AssertionError("Invalid rows found. Details are logged in 'test_results_1.txt'.")
