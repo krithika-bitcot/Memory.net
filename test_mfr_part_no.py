@@ -5,7 +5,7 @@ import pytest
 # Validation function
 def is_valid_mfr_part_no(value):
     
-    pattern = r'^[a-zA-Z0-9]{4,8}(-B21|-H21|-K21|-S01|-L22|-S21|-L21|-001|-B22)?$'
+    pattern = r'^[a-zA-Z0-9]{4,6}(-B21|-H21|-K21|-S01|-L22|-S21|-L21|-001|-B22)?$'
     return bool(re.match(pattern, str(value)))
 
 @pytest.fixture
