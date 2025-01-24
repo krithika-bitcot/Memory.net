@@ -1,4 +1,5 @@
 Manufacturer Part Number Validation
+
 This script validates the mfr_part_no (Manufacturer Part Number) column in a given CSV file. It checks whether each part number follows a specific format and logs the results (both valid and invalid values) to a text file. The script uses regular expressions to ensure that the part numbers conform to the expected pattern.
 
 Features
@@ -64,5 +65,7 @@ Optionally, the part number can end with one of the following suffixes: -B21, -H
 Error Handling
 If the mfr_part_no column is missing from the CSV file, the test will fail with an assertion error.
 If there are any invalid part numbers, the test will fail, and the details will be logged to the test_results.txt file.
+
 ==========================================================================================================================================
+
 
