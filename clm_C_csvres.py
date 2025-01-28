@@ -18,7 +18,7 @@ def has_comma(value: str) -> bool:
     return ',' in value
 
 @pytest.fixture
-def load_csv():
+def load_csv():          
     """Fixture to load the CSV file into a DataFrame."""
     file_path = "hpe_db_import (1).csv"  # <-- Update with your CSV path
     df = pd.read_csv(file_path)
@@ -48,7 +48,7 @@ def test_column_c_data(load_csv):
                 "value": value,
                 "error": "Comma detected in column C"
             })
-            continue
+            continue 
 
         # 2) Check if only letters, digits, spaces, and hyphens
         if not is_valid_value(value):
