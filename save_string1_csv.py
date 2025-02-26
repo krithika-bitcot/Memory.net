@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-
+       
 # Validation function
 def is_valid_alphabet(value):
     """
@@ -11,7 +11,7 @@ def is_valid_alphabet(value):
 @pytest.fixture
 def load_csv():
     """Fixture to load the CSV file into a DataFrame."""
-    file_path = "hpe_db_import (1).csv"  # Path to your test CSV file
+    file_path = "Memory.net\chunk_1.csv"  # Path to your test CSV file
     df = pd.read_csv(file_path)
     df.columns = df.columns.str.strip()  # Ensure no extra spaces in column names
     return df
