@@ -45,7 +45,7 @@ def get_actual_categories(test_file_path: str) -> tuple[str, set[str]]:
     else:
         df = pd.read_csv(test_file_path, dtype=str)
 
-    df = df.iloc[:, [0, 5]].copy()
+    df = df.iloc[:, [0,7]].copy()
     df.columns = ['store', 'category']
     df['store'] = df['store'].astype(str).str.strip().str.lower()
     df['category'] = df['category'].fillna('').astype(str).str.strip().str.lower()
