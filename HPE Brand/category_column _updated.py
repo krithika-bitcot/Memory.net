@@ -82,3 +82,5 @@ def test_categories():
     # write CSV and assert
     write_report(store, result)
     assert actual == expected, result
+
+#end of file
