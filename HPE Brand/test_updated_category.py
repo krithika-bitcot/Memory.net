@@ -55,3 +55,5 @@ def test_category_column():
         pytest.fail(f"Missing categories in the CSV: {', '.join(missing_categories)}")  # Fail after logging the issue
     else:
         print("All required categories are present in the CSV.")
+
+# Run the test
