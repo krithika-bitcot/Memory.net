@@ -23,7 +23,6 @@ MASTER_CATEGORIES = {
 TEST_FILE   = '06052025_cisco_db_import.csv'
 OUTPUT_CSV  = 'missing_categories_report.csv'
 
-
 # ─── HELPERS ───
 
 def get_expected_categories(store: str) -> set[str]:
@@ -76,12 +75,10 @@ def get_actual_categories(test_file_path: str) -> tuple[str, set[str]]:
 
     return store_value, actual_cats
 
-
 def write_report(store: str, result: str):
     """Write a one‐row CSV with store and result."""
     pd.DataFrame([{'store': store, 'result': result}]) \
       .to_csv(OUTPUT_CSV, index=False)
-
 
 # ─── THE TEST ───
 
