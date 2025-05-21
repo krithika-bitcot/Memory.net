@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 # ─── CONFIG ───
-# In‐code brand→required‐columns mapping (all keys & values lowercase)
+# In-code brand→required-columns mapping (all keys & values lowercase)
 MASTER_RULES = {
     'asus': [
         'host_image_url', 'host_url', 'server_description', 'server_specification',
@@ -87,14 +87,16 @@ MASTER_RULES = {
         'file_name', 'host_url', 'part_url', 'gen'
     ],
     'kingston': [
-        'store', 'a', 'b', 'c', 'server_description', 'category', 'part_number',
-        'part_description', 'part_specification', 'server_specification',
-        'configuration_notes', 'memory', 'ssd', 'processor', 'dimm_slots',
-        'maximum_memory', 'storage_support', 'memory_specification',
-        'encode_status', 'speed', 'ranks', 'rank_width', 'memory_type',
-        'dimm_type', 'ecc', 'voltage', 'qty', 'part_image_url', 'host_url',
-        'part_url', 'capacity', 'capacity_in_gb', 'capacity_in_tb', 'dimensions',
-        'form_factor', 'height', 'interface', 'memory_sku'
+        'store', 'a', 'b', 'c', 'server_description', 'server_form_factor',
+        'category', 'option_part_no', 'part_description', 'part_specification',
+        'server_specification', 'configuration_notes', 'memory', 'ssd',
+        'dimm_slots', 'processor_sockets', 'maximum_memory', 'storage_support',
+        'ssd_sku', 'memory_specification', 'encode_status', 'capacity',
+        'capacity_in_tb', 'capacity_in_gb', 'speed', 'ranks', 'rank_width',
+        'memory_type', 'dimm_type', 'ecc', 'voltage', 'height', 'qty',
+        'interface', 'form_factor', 'dimensions', 'part_image_url', 'host_url',
+        'part_url', 'product_id', 'dimm_ranks', 'server_dimm_ranks',
+        'chipset', 'processor', 'processor_max_memory_speed'
     ],
     'lenovo': [
         'server_description', 'server_specification', 'a', 'b', 'c', 'processor',
@@ -189,7 +191,7 @@ MASTER_RULES = {
     ],
 }
 
-TEST_FILE   = 'Axiom_db_import.xlsx'
+TEST_FILE   = '27012025_hpe_db_import.csv'
 REPORT_FILE = 'validation_results.csv'
 
 
@@ -198,8 +200,19 @@ REPORT_FILE = 'validation_results.csv'
 def load_any_file(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xls', '.xlsx'):
-        return pd.read_excel(path, dtype=str, engine='openpyxl')
-    return pd.read_csv(path, dtype=str)
+        df = pd.read_excel(path, dtype=str, engine='openpyxl')
+    else:
+        df = pd.read_csv(path, dtype=str)
+
+
+
+  # ── DROP ALL "Unnamed" COLUMNS ──
+    # pandas names blank‐header cols as "Unnamed: N"
+    df = df.loc[:, ~df.columns
+                   .str.lower()
+                   .str.startswith('unnamed')]
+
+    return df
 
 
 def infer_brand_from_filename(filename: str) -> str:
@@ -211,18 +224,24 @@ def infer_brand_from_filename(filename: str) -> str:
     raise ValueError(f"Cannot infer brand from filename '{filename}'")
 
 
-def write_report(file: str, brand: str, missing: list[str]):
+def write_report(file: str, brand: str, missing: list[str], extra: list[str]):
     """
     Append or create REPORT_FILE with columns:
       file, brand, result
+    where result may include missing and/or extra columns.
     """
-    result = 'all pass' if not missing else 'missing: ' + ', '.join(missing)
+    parts = []
+    if missing:
+        parts.append("missing: " + ", ".join(missing))
+    if extra:
+        parts.append("extra: "   + ", ".join(extra))
+    result = "all pass" if not parts else "; ".join(parts)
+
     df = pd.DataFrame([{
         'file':   file,
         'brand':  brand,
         'result': result
     }])
-    # write header only if file doesn't exist yet
     write_header = not os.path.exists(REPORT_FILE)
     df.to_csv(REPORT_FILE, mode='a', index=False, header=write_header)
 
@@ -239,14 +258,16 @@ def test_required_columns_present():
     df      = load_any_file(TEST_FILE)
     present = {col.strip().lower() for col in df.columns}
 
-    # 3) compute missing columns
+    # 3) compute missing *and* extra columns
     missing = sorted(required - present)
+    extra   = sorted(present  - required)
 
     # 4) write the CSV report (always runs, even if assertion fails)
-    write_report(TEST_FILE, brand, missing)
+    write_report(TEST_FILE, brand, missing, extra)
 
-    # 5) assert that nothing is missing
-    assert not missing, (
-        f"File '{TEST_FILE}' for brand '{brand}' is missing "
-        f"{len(missing)} required columns: {missing}"
+    # 5) assert that nothing is missing *or* extra
+    assert not missing and not extra, (
+        f"File '{TEST_FILE}' for brand '{brand}' has:\n"
+        f"  • {len(missing)} missing columns: {missing}\n"
+        f"  • {len(extra)} extra   columns: {extra}"
     )
