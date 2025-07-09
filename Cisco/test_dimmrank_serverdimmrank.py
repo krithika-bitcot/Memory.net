@@ -230,3 +230,4 @@ def test_dimm_ranks_presence_in_server(df: pd.DataFrame):
             f"DIMM ranks validation failed in the following rows: {', '.join(str(r['row']) for r in fails)}\n"
             f"See 'dimm_ranks_combined_report.csv' for details."
         )
+#end of the code
