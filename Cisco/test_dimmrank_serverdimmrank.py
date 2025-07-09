@@ -42,32 +42,43 @@ def _parse_list(cell: str) -> list[str]:
                 yield str(item).strip().strip("'\"")
     return list(_flatten(parsed))
 
-# Define the valid DIMM rank values based on the checkboxes, excluding "(Blanks)"
+# Define the valid DIMM rank values based on the checkboxes
 VALID_DIMM_RANKS = {"1Rx2", "1Rx4", "1Rx8", "2Rx4", "2Rx8", "4Rx4", "8Rx4"}
 
-# Update the helper function to exclude "(Blanks)" during validation
-def _validate_dimm_ranks(ranks: set) -> bool:
-    """
-    Validate that all DIMM ranks are in the predefined list of valid ranks, 
-    excluding "(Blanks)".
-    """
-    # Filter out "(Blanks)" and check if remaining values are valid
-    ranks = {rank for rank in ranks if rank != "(Blanks)"}
-    return all(rank in VALID_DIMM_RANKS for rank in ranks)
+# Regular expression to strictly validate DIMM rank pattern like '1Rx2', '2Rx4', etc.
+DIMM_RANK_PATTERN = re.compile(r'^\dRx\d$')  # Only allows one digit for rank and width
 
-def test_dimm_ranks_row_level(df):
+def _validate_dimm_ranks(dimm_ranks_list: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Validate DIMM ranks against the valid set.
+    Returns (valid_ranks, invalid_ranks)
+    """
+    valid_ranks = []
+    invalid_ranks = []
+    
+    for rank in dimm_ranks_list:
+        if rank in VALID_DIMM_RANKS:
+            valid_ranks.append(rank)
+        else:
+            invalid_ranks.append(rank)
+    
+    return valid_ranks, invalid_ranks
+
+def test_dimm_ranks_row_level(df: pd.DataFrame):
     """
     Row-by-row: Build exactly one expected "<rank>Rx<width>" per row,
-    parse that row’s dimm_ranks, and assert the expected pattern matches.
-    Writes dimm_ranks_row_report.csv.
+    parse that row's dimm_ranks, and assert the expected pattern matches.
+    Also validates all dimm_ranks against the valid set.
+    Writes a combined output file with actual and expected columns.
     """
     # Ensure columns exist
-    for col in ("option_part_no", "ranks", "rank_width", "dimm_ranks"):
+    for col in ("server_description", "option_part_no", "ranks", "rank_width", "dimm_ranks"):
         assert col in df.columns, f"Missing required column '{col}'"
     
     report = []
     for idx, row in df.iterrows():
         part_no = str(row["option_part_no"]).strip()
+        server_desc = str(row["server_description"]).strip()  # Capture the server description
         
         # Build expected pattern like "<rank>Rx<width>"
         try:
@@ -77,6 +88,7 @@ def test_dimm_ranks_row_level(df):
         except Exception:
             report.append({
                 "row": idx,
+                "server_description": server_desc,
                 "option_part_no": part_no,
                 "expected": "",
                 "actual": "",
@@ -85,22 +97,30 @@ def test_dimm_ranks_row_level(df):
             })
             continue
 
-        # Parse dimm_ranks as a list and check for expected pattern match
-        actual_set = set(_parse_list(row["dimm_ranks"]))
+        # Parse dimm_ranks as a list and validate against valid set
+        actual_list = _parse_list(row["dimm_ranks"])
+        valid_ranks, invalid_ranks = _validate_dimm_ranks(actual_list)
         
-        # Validate that the parsed dimm_ranks are in the valid set, excluding "(Blanks)"
-        if not _validate_dimm_ranks(actual_set):
+        actual_set = set(actual_list)
+        status = "PASS"
+        mismatch = ""
+        
+        # Check for invalid ranks
+        if invalid_ranks:
             status = "FAIL"
-            mismatch = f"Invalid dimm_ranks: {', '.join(actual_set)}"
-        elif any(re.fullmatch(rf"{r}Rx{w}", item) for item in actual_set):
-            status = "PASS"
-            mismatch = ""
-        else:
+            mismatch = f"Invalid dimm_ranks found: {', '.join(invalid_ranks)}"
+        
+        # Check if expected pattern is present (only if no invalid ranks)
+        if not invalid_ranks and expected not in actual_set:
             status = "FAIL"
-            mismatch = expected
+            if mismatch:
+                mismatch += f"; Expected '{expected}' not found in dimm_ranks"
+            else:
+                mismatch = f"Expected '{expected}' not found in dimm_ranks"
         
         report.append({
             "row": idx,
+            "server_description": server_desc,
             "option_part_no": part_no,
             "expected": expected,
             "actual": ",".join(sorted(actual_set)),
@@ -108,12 +128,12 @@ def test_dimm_ranks_row_level(df):
             "status": status
         })
 
-    # Write the row-level report
-    out_path = os.path.join(os.path.dirname(__file__), "dimm_ranks_row_report.csv")
+    # Write the combined report to CSV
+    out_path = os.path.join(os.path.dirname(__file__), "dimm_ranks_combined_report.csv")
     with open(out_path, "w", newline="") as fp:
         writer = csv.DictWriter(
             fp,
-            fieldnames=["row", "option_part_no", "expected", "actual", "mismatch", "status"]
+            fieldnames=["row", "server_description", "option_part_no", "expected", "actual", "mismatch", "status"]
         )
         writer.writeheader()
         writer.writerows(report)
@@ -123,79 +143,90 @@ def test_dimm_ranks_row_level(df):
     if fails:
         parts = [f"{r['option_part_no']}(row {r['row']})" for r in fails]
         pytest.fail(
-            f"DIMM-ranks mismatch or invalid entries in rows: {parts}\n"
-            f"See 'dimm_ranks_row_report.csv' for details."
+            f"DIMM-ranks validation failed in rows: {parts}\n"
+            f"See 'dimm_ranks_combined_report.csv' for details."
         )
 
-
-def test_dimm_ranks_presence_in_server(df):
+def test_dimm_ranks_presence_in_server(df: pd.DataFrame):
     """
     Row-by-row: parse single‐value dimm_ranks and list‐value server_dimm_ranks,
     assert every dimm_rank appears in the server list.
-    Checks for duplicates in server_dimm_ranks and writes dimm_ranks_server_report.csv.
+    Validates both dimm_ranks and server_dimm_ranks against the valid set.
+    Checks for duplicates in server_dimm_ranks and writes a combined output file.
     """
     # Ensure columns exist
-    for col in ("server_description", "dimm_ranks", "server_dimm_ranks"):
+    for col in ("dimm_ranks", "server_dimm_ranks", "server_description"):
         assert col in df.columns, f"Missing required column '{col}'"
 
     # Initialize the report
     report = []
 
-    # Group the data by server description and process each group
-    for server_desc, group in df.groupby("server_description"):
-        # For each server, extract all DIMM ranks for this server
-        server_dimm_ranks_set = set(_parse_list(group["server_dimm_ranks"].iloc[0]))  # Assuming same server_dimm_ranks across rows
-        mismatch_ranks = set()
-        duplicate_ranks = set()
+    # Iterate through each row
+    for idx, row in df.iterrows():
+        dimm_list = _parse_list(row["dimm_ranks"])
+        server_dimm_ranks = _parse_list(row["server_dimm_ranks"])
+        server_desc = str(row["server_description"]).strip()  # Capture the server description
 
-        # Check for mismatch DIMM ranks in each row for the given server description
-        for idx, row in group.iterrows():
-            dimm_set = set(_parse_list(row["dimm_ranks"]))  # Set of all DIMM ranks for this row
-            server_dimm_ranks = _parse_list(row["server_dimm_ranks"])
+        # Validate dimm_ranks against valid set
+        valid_dimm_ranks, invalid_dimm_ranks = _validate_dimm_ranks(dimm_list)
+        
+        # Validate server_dimm_ranks against valid set
+        valid_server_ranks, invalid_server_ranks = _validate_dimm_ranks(server_dimm_ranks)
+        
+        dimm_set = set(valid_dimm_ranks)  # Only use valid dimm_ranks for comparison
+        server_set = set(valid_server_ranks)  # Only use valid server_dimm_ranks for comparison
 
-            # Validate that the dimm_ranks are in the valid set, excluding "(Blanks)"
-            if not _validate_dimm_ranks(dimm_set):
-                mismatch_ranks.update(dimm_set)
-            
-            # Check for duplicates in the server_dimm_ranks
-            duplicates = [item for item in server_dimm_ranks if server_dimm_ranks.count(item) > 1]
-            if duplicates:
-                duplicate_ranks.update(duplicates)  # Collect duplicate ranks
+        status = "PASS"
+        issues = []
 
-            # Check for mismatch DIMM ranks in the server_dimm_ranks
-            mismatch = dimm_set - server_dimm_ranks_set  # Check if any dimm_ranks are mismatch in server_dimm_ranks
-            if mismatch:
-                mismatch_ranks.update(mismatch)  # Collect all mismatch ranks
-
-        # Log results for the current server
-        if mismatch_ranks or duplicate_ranks:
+        # Check for invalid entries in dimm_ranks
+        if invalid_dimm_ranks:
             status = "FAIL"
-        else:
-            status = "PASS"
+            issues.append(f"Invalid dimm_ranks: {', '.join(invalid_dimm_ranks)}")
+
+        # Check for invalid entries in server_dimm_ranks
+        if invalid_server_ranks:
+            status = "FAIL"
+            issues.append(f"Invalid server_dimm_ranks: {', '.join(invalid_server_ranks)}")
+
+        # Check if all valid dimm_ranks are contained in valid server_dimm_ranks
+        mismatch = dimm_set - server_set
+        if mismatch:
+            status = "FAIL"
+            issues.append(f"dimm_ranks not in server_dimm_ranks: {', '.join(mismatch)}")
+
+        # Check for duplicates in the server_dimm_ranks
+        duplicate_ranks = [item for item in server_dimm_ranks if server_dimm_ranks.count(item) > 1]
+        if duplicate_ranks:
+            status = "FAIL"
+            issues.append(f"Duplicates in server_dimm_ranks: {', '.join(set(duplicate_ranks))}")
 
         report.append({
+            "row": idx,
             "server_description": server_desc,
-            "mismatch": ",".join(sorted(mismatch_ranks)) if mismatch_ranks else "",
-            "duplicates": ",".join(sorted(duplicate_ranks)) if duplicate_ranks else "",
-            "status": status,
-            "actual_data": ",".join(sorted(_parse_list(group["server_dimm_ranks"].iloc[0])))  # Include actual server dimm_ranks data
+            "dimm_ranks": ",".join(sorted(dimm_list)),
+            "server_dimm_ranks": ",".join(sorted(server_dimm_ranks)),
+            "invalid_dimm_ranks": ",".join(sorted(invalid_dimm_ranks)) if invalid_dimm_ranks else "",
+            "invalid_server_ranks": ",".join(sorted(invalid_server_ranks)) if invalid_server_ranks else "",
+            "issues": "; ".join(issues) if issues else "",
+            "status": status
         })
 
-    # Write the result report to CSV
-    out_path = os.path.join(os.path.dirname(__file__), "dimm_ranks_server_report.csv")
+    # Write the combined report to CSV
+    out_path = os.path.join(os.path.dirname(__file__), "dimm_ranks_combined_report.csv")
     with open(out_path, "w", newline="") as fp:
         writer = csv.DictWriter(
             fp,
-            fieldnames=["server_description", "mismatch", "duplicates", "status", "actual_data"]
+            fieldnames=["row", "server_description", "dimm_ranks", "server_dimm_ranks", 
+                       "invalid_dimm_ranks", "invalid_server_ranks", "issues", "status"]
         )
         writer.writeheader()
         writer.writerows(report)
 
-    # Fail if any server description has mismatch DIMM ranks or duplicates
+    # Fail if any row has a FAIL status
     fails = [r for r in report if r["status"] == "FAIL"]
     if fails:
-        parts = [f"{r['server_description']}" for r in fails]
         pytest.fail(
-            f"DIMM ranks mismatch or duplicates in the following server descriptions: {parts}\n"
-            f"See 'dimm_ranks_server_report.csv' for details."
+            f"DIMM ranks validation failed in the following rows: {', '.join(str(r['row']) for r in fails)}\n"
+            f"See 'dimm_ranks_combined_report.csv' for details."
         )
