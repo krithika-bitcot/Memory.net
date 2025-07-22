@@ -43,7 +43,7 @@ def _parse_list(cell: str) -> list[str]:
     return list(_flatten(parsed))
 
 # Define the valid DIMM rank values based on the checkboxes
-VALID_DIMM_RANKS = {"1Rx2", "1Rx4", "1Rx8", "2Rx4", "2Rx8", "4Rx4", "8Rx4"}
+VALID_DIMM_RANKS = {"1Rx2", "1Rx4", "1Rx8","1Rx16","2Rx4", "2Rx8","2Rx16","3Rx4","4Rx4","4Rx8", "8Rx4"}
 
 # Regular expression to strictly validate DIMM rank pattern like '1Rx2', '2Rx4', etc.
 DIMM_RANK_PATTERN = re.compile(r'^\dRx\d$')  # Only allows one digit for rank and width
