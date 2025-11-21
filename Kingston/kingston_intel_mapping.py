@@ -17,9 +17,9 @@ except Exception:
     USE_SWIFTER = False
     print("Swifter not available")
    
-# --------------------
+
 # Normalization helpers
-# --------------------
+
 @lru_cache(maxsize=1000)
 def normalize_chipset_name(chipset: str) -> str:
     if not isinstance(chipset, str):
