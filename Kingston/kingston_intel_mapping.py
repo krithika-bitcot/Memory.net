@@ -190,9 +190,7 @@ def kingston_df():
 
 def test_compare_intel_and_kingston(intel_df, kingston_df):
     start = time.time()
-    print("\n" + "=" * 80)
     print("Intel-Kingston Processor")
-    print("=" * 80)
 
     # Normalize Intel chipsets
     intel_df['chipset_normalized'] = intel_df['chipset'].apply(normalize_chipset_name)
