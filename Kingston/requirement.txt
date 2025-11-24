@@ -1,0 +1,7 @@
+# Requirements for Intel-Kingston Processor Comparison
+
+pandas
+pytest
+swifter
+numpy
+tqdm
