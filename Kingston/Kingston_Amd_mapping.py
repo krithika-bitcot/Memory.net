@@ -3,9 +3,7 @@ import ast
 import pandas as pd
 import pytest
 
-# ===============================================================
 # Utility Functions
-# ===============================================================
 
 def norm(s):
     """Normalize string by making it lowercase, removing special chars and extra spaces."""

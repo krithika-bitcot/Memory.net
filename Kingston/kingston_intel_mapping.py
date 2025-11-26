@@ -7,7 +7,7 @@ import pytest
 import pandas as pd
 from functools import lru_cache
 
-warnings.filterwarnings('ignore', category=FutureWarning)
+#warnings.filterwarnings('ignore', category=FutureWarning)
 
 try:
     import swifter  # type: ignore
