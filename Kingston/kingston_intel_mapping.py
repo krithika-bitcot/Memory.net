@@ -7,7 +7,7 @@ import pytest
 import pandas as pd
 from functools import lru_cache
 
-#warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 try:
     import swifter  # type: ignore
@@ -16,9 +16,10 @@ try:
 except Exception:
     USE_SWIFTER = False
     print("Swifter not available")
-   
 
+# --------------------
 # Normalization helpers
+# --------------------
 
 @lru_cache(maxsize=1000)
 def normalize_chipset_name(chipset: str) -> str:
@@ -48,9 +49,32 @@ def normalize_processor_name(name: str) -> str:
     return ' '.join(s.split())
 
 # For per-row duplicate detection
-
 def dup_norm(name: str) -> str:
     return normalize_processor_name(name)
+
+# --------------------
+# NEW HELPER - DUPLICATE DETECTION (USED IN TWO PLACES)
+# --------------------
+
+def find_duplicates_in_list(plist):
+    """
+    Returns list of duplicate processors within a single list after normalization
+    """
+    if not isinstance(plist, list):
+        return []
+
+    seen, dups = set(), []
+
+    for p in plist:
+        n = dup_norm(p)
+        if not n:
+            continue
+        if n in seen:
+            dups.append(p)
+        else:
+            seen.add(n)
+
+    return dups
 
 # --------------------
 # Utils
@@ -85,13 +109,9 @@ def compute_unmatched_both_sides(intel_procs, kingston_procs):
 
     return backmap(intel_missing_norm, intel_procs), backmap(kingston_extra_norm, kingston_procs)
 
-# Helper: detect server description column name from Kingston file (case-insensitive)
-
 def detect_server_description_col(df: pd.DataFrame):
     candidates = {
-        'server description', 'server_description', 'serverdesc',
-        'server details', 'server_details', 'server-detail', 'server-desc',
-        'server', 'system description', 'system_description'
+        'server description', 'server_description'
     }
     lower_map = {c.lower().strip(): c for c in df.columns}
     for key in candidates:
@@ -102,6 +122,7 @@ def detect_server_description_col(df: pd.DataFrame):
 # --------------------
 # Loaders
 # --------------------
+
 @pytest.fixture(scope="module")
 def intel_df():
     intel_file = "19052025_intel_processors (2).csv"
@@ -125,7 +146,7 @@ def intel_df():
 
 @pytest.fixture(scope="module")
 def kingston_df():
-    kingston_file = "kingston_mapped_with_all_intel_products_1.csv"
+    kingston_file = "kingston_mapped_with_all_intel_products_chunks\\kingston_mapped_with_all_intel_products_1.csv"
     if not os.path.exists(kingston_file):
         pytest.fail(f" Kingston file not found: {kingston_file}")
 
@@ -133,9 +154,8 @@ def kingston_df():
     assert 'chipset' in df.columns and 'final_processor_data' in df.columns, \
         "Kingston CSV must contain those columns memtioned"
 
-    # Keep original server description col name (if any)
     server_desc_col = detect_server_description_col(df)
-    df.attrs['server_desc_col'] = server_desc_col  # stash for later
+    df.attrs['server_desc_col'] = server_desc_col
 
     df = df[df['chipset'].notna()]
     df = df[df['chipset'].astype(str).str.strip() != ""]
@@ -164,19 +184,7 @@ def kingston_df():
             s = val.strip()
             if s == "":
                 return []
-            if s.startswith('[') and s.endswith(']'):
-                try:
-                    return ast.literal_eval(s)
-                except Exception:
-                    return [s]
-            if s.startswith('(') and s.endswith(')'):
-                try:
-                    tup = ast.literal_eval(s)
-                    return list(tup) if isinstance(tup, tuple) else [s]
-                except Exception:
-                    return [s]
-            return [s]
-        return [str(val)]
+        return []
 
     df['final_processor_data'] = df['final_processor_data'].swifter.apply(safe_eval) if USE_SWIFTER else df['final_processor_data'].apply(safe_eval)
 
@@ -190,16 +198,13 @@ def kingston_df():
 
 def test_compare_intel_and_kingston(intel_df, kingston_df):
     start = time.time()
-    print("\n" + "=" * 80)
     print("Intel-Kingston Processor")
-    print("=" * 80)
 
-    # Normalize Intel chipsets
     intel_df['chipset_normalized'] = intel_df['chipset'].apply(normalize_chipset_name)
 
-    # Map Intel chipsets to Kingston via model token
     intel_set = {c for c in set(intel_df['chipset_normalized']) if c}
     kingston_set = {c for c in set(kingston_df['chipset_normalized']) if c}
+
     ikey = {s: chipset_key(s) for s in intel_set}
     kkey = {s: chipset_key(s) for s in kingston_set}
 
@@ -216,7 +221,6 @@ def test_compare_intel_and_kingston(intel_df, kingston_df):
     if len(intel_df_mapped) == 0:
         pytest.fail(" No Intel rows mapped")
 
-    # Aggregate Kingston processors per chipset (UNION unique)
     kingston_grouped = (
         kingston_df.groupby('chipset_normalized', dropna=True)['final_processor_data']
                    .apply(merge_processors_unique)
@@ -229,41 +233,31 @@ def test_compare_intel_and_kingston(intel_df, kingston_df):
         kingston_grouped,
         left_on='chipset_mapped',
         right_on='chipset_normalized_k',
-        how='left'  # keep Intel even if Kingston side missing
+        how='left'
     )
 
     print(f"Total mapped chipset rows in Intel: {len(merged)}")
 
-    # Collectors
-    per_row_missing_records = []   # will later be merged with all-rows duplicate info + server desc
+    per_row_missing_records = []
     result_rows = []
 
-    # Convenience grouping: Kingston rows by chipset
     k_rows_by_chipset = {k: g for k, g in kingston_df.groupby('chipset_normalized', dropna=True)}
 
-    # Precompute duplicates for ALL Kingston rows (independent of mapping)
+    # ---- BUILT USING HELPER FUNCTION ----
     dup_all_rows = []
+
     for _, kr in kingston_df.iterrows():
         plist = kr['final_processor_data'] if isinstance(kr['final_processor_data'], list) else []
-        seen, row_dups = set(), []
-        for p in plist:
-            n = dup_norm(p)
-            if not n:
-                continue
-            if n in seen:
-                row_dups.append(p)
-            else:
-                seen.add(n)
+        row_dups = find_duplicates_in_list(plist)
+
         dup_all_rows.append({
             'kingston_row_index': int(kr['kingston_row_index']),
             'per_row_duplicate_count': len(row_dups),
             'per_row_duplicate_list': str(row_dups),
             'chipset_normalized': kr['chipset_normalized']
         })
-    dup_all_df = pd.DataFrame(dup_all_rows)
 
-    # Determine server description column name
-    server_desc_col = kingston_df.attrs.get('server_desc_col', None)
+    dup_all_df = pd.DataFrame(dup_all_rows)
 
     for _, row in merged.iterrows():
         chipset_intel_raw = row['chipset']
@@ -271,10 +265,8 @@ def test_compare_intel_and_kingston(intel_df, kingston_df):
         intel_procs = row['intel_processors']
         kingston_procs_agg = row.get('processor_agg', []) or []
 
-        # Aggregated subset comparison
         intel_missing_list_agg, kingston_extra_list_agg = compute_unmatched_both_sides(intel_procs, kingston_procs_agg)
 
-        # Per-row checks (missing + duplicates per-row) for MAPPED chipsets
         krows = k_rows_by_chipset.get(chipset_norm_key, pd.DataFrame())
         rows_total = len(krows)
         rows_all_empty = 0
@@ -297,23 +289,16 @@ def test_compare_intel_and_kingston(intel_df, kingston_df):
             })
         else:
             for _, krow in krows.iterrows():
+
                 plist = krow['final_processor_data'] if isinstance(krow['final_processor_data'], list) else []
 
-                # per-row duplicates (for mapped set roll-up)
-                seen, row_dups = set(), []
-                for p in plist:
-                    n = dup_norm(p)
-                    if not n:
-                        continue
-                    if n in seen:
-                        row_dups.append(p)
-                    else:
-                        seen.add(n)
+                # ---- USING HELPER FUNCTION ----
+                row_dups = find_duplicates_in_list(plist)
+
                 if row_dups:
                     rows_with_duplicates += 1
                     per_row_duplicate_accum.extend(row_dups)
 
-                # per-row missing
                 k_norm_set = {normalize_processor_name(p) for p in plist if isinstance(p, str) and p.strip()}
                 missing_norm = sorted(list(i_norm_set - k_norm_set))
                 missing_originals = [backmap[n] for n in missing_norm]
@@ -367,28 +352,23 @@ def test_compare_intel_and_kingston(intel_df, kingston_df):
             'per_row_duplicate_list': str(per_row_duplicate_accum),
         })
 
-    # Build DataFrames
     result_df = pd.DataFrame(result_rows)
 
-    # ---- Build the ALL-ROWS per-row output with duplicates and server description ----
-    # Start from all Kingston rows
     per_row_all = kingston_df[['kingston_row_index', 'chipset', 'chipset_normalized']].copy()
 
-    # Attach server description if present
     server_desc_col = kingston_df.attrs.get('server_desc_col', None)
     if server_desc_col and server_desc_col in kingston_df.columns:
         per_row_all['server_description'] = kingston_df[server_desc_col]
     else:
         per_row_all['server_description'] = None
 
-    # Attach per-row duplicates for ALL rows
     per_row_all = per_row_all.merge(
         dup_all_df[['kingston_row_index', 'per_row_duplicate_count', 'per_row_duplicate_list']],
         on='kingston_row_index', how='left'
     )
 
-    # Attach missing info we computed ONLY for mapped chipsets/rows
     per_row_missing_df = pd.DataFrame(per_row_missing_records)
+
     if not per_row_missing_df.empty:
         per_row_all = per_row_all.merge(
             per_row_missing_df[['kingston_row_index', 'chipset_intel', 'missing_count', 'missing_intel_processors', 'kingston_row_has_data']],
@@ -400,20 +380,15 @@ def test_compare_intel_and_kingston(intel_df, kingston_df):
         per_row_all['missing_intel_processors'] = pd.NA
         per_row_all['kingston_row_has_data'] = pd.NA
 
-    # Save ONLY requested outputs
     result_df.to_csv('intel_kingston_comparison_result.csv', index=False)
     per_row_all.to_csv('missing_per_row_in_kingston.csv', index=False)
 
-    # STRICT assertion (evaluate only on mapped chipsets)
     violations = result_df[result_df['violates_rule'] == True]
     assert len(violations) == 0, (
-    
-        "(aggregated missing and/or per-row missing/empty/no-data and/or per-row duplicates). "
+        "(aggregated missing)."
     )
 
-    
     print(f"Total time : {time.time() - start:.2f}s")
 
-# Runner (optional)
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '-s', '--tb=short'])
